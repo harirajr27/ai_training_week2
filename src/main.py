@@ -6,15 +6,14 @@ from src.database import get_db
 from src.models import Customer
 from src.schemas import CustomerCreate, CustomerOut, CustomerUpdate
 
-app = FastAPI(title="Customer Management API")
+app = FastAPI(title="Customer Management API - Task 2")
 
-# Define the API Key header requirement (Matches "No API key -> 401")
+# API Key header requirement (Matches "No API key -> 401")
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
 
 def verify_api_key(api_key: str = Security(api_key_header)):
-    # If the header is missing or empty, throw a 401 Unauthorized immediately
     if not api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -23,7 +22,7 @@ def verify_api_key(api_key: str = Security(api_key_header)):
     return api_key
 
 
-# --- HEALTH ENDPOINT (Unprotected or Protected based on your preference) ---
+# --- HEALTH ENDPOINT ---
 @app.get("/health", status_code=status.HTTP_200_OK)
 def health_check(db: Session = Depends(get_db)):
     try:
@@ -33,7 +32,7 @@ def health_check(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Database connection failed")
 
 
-# --- CRUD ENDPOINTS ---
+# --- CRUD ENDPOINTS PROTECTED WITH API KEY ---
 
 
 @app.post(
@@ -46,8 +45,13 @@ def create_customer(customer: CustomerCreate, db: Session = Depends(get_db)):
     db_customer = (
         db.query(Customer).filter(Customer.email == customer.email).first()
     )
+
+    # CRITICAL FIX: Returns 409 Conflict instead of 400 for duplicate emails
     if db_customer:
-        raise HTTPException(status_code=400, detail="Email already registered")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered",
+        )
 
     new_customer = Customer(**customer.model_dump())
     db.add(new_customer)
@@ -65,7 +69,6 @@ def create_customer(customer: CustomerCreate, db: Session = Depends(get_db)):
 def read_customers(
     page: int = 1, per_page: int = 10, db: Session = Depends(get_db)
 ):
-    # Convert page and per_page math to standard SQL offset limits
     skip = (page - 1) * per_page
     return db.query(Customer).offset(skip).limit(per_page).all()
 
@@ -78,8 +81,13 @@ def read_customers(
 )
 def read_customer(customer_id: int, db: Session = Depends(get_db)):
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
+
+    # Returns 404 for unknown ids
     if not customer:
-        raise HTTPException(status_code=404, detail="Customer not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found",
+        )
     return customer
 
 
@@ -94,7 +102,10 @@ def update_customer(
     customer_query = db.query(Customer).filter(Customer.id == customer_id)
     customer = customer_query.first()
     if not customer:
-        raise HTTPException(status_code=404, detail="Customer not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found",
+        )
 
     update_dict = updated_data.model_dump(exclude_unset=True)
     if "email" in update_dict and update_dict["email"] != customer.email:
@@ -102,7 +113,11 @@ def update_customer(
             db.query(Customer).filter(Customer.email == update_dict["email"]).first()
         )
         if email_check:
-            raise HTTPException(status_code=400, detail="Email already in use")
+            # Returns 409 Conflict if updating email to one that already exists
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email already in use",
+            )
 
     customer_query.update(update_dict, synchronize_session=False)
     db.commit()
@@ -118,7 +133,10 @@ def update_customer(
 def delete_customer(customer_id: int, db: Session = Depends(get_db)):
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
-        raise HTTPException(status_code=404, detail="Customer not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found",
+        )
 
     db.delete(customer)
     db.commit()
